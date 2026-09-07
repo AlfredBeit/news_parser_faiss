@@ -13,6 +13,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 RSS_URL = "https://www.vedomosti.ru/rss/news.xml"
 INDEX_PATH = Path("vedomosti_faiss_index")
 MAX_RESULTS = 5
+OPENAI_HEADERS = {"Accept-Encoding": "identity"}
 
 KEYWORDS = (
     "банкрот", "риск", "санкц", "уголовн", "арест", "обыск",
@@ -29,8 +30,10 @@ def load_news(url: str) -> list[str]:
     """Загружает из RSS непустые заголовки и описания."""
     feed = feedparser.parse(url)
 
-    if feed.bozo:
-        logging.warning("Проблема при чтении RSS: %s", feed.bozo_exception)
+    parse_error = getattr(feed, "bozo_exception", None)
+    encoding_warning = "document declared as" in str(parse_error).lower()
+    if feed.bozo and not encoding_warning:
+        logging.warning("Проблема при чтении RSS: %s", parse_error)
     if not feed.entries:
         raise RuntimeError("RSS-лента не содержит новостей.")
 
@@ -61,6 +64,7 @@ def build_context(news_items: list[str]) -> str:
     """Создаёт FAISS-индекс и возвращает релевантные документы."""
     embeddings = OpenAIEmbeddings(
         model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
+        default_headers=OPENAI_HEADERS,
         max_retries=2,
     )
     vector_db = FAISS.from_texts(texts=news_items, embedding=embeddings)
@@ -102,6 +106,7 @@ def analyze_news(context: str) -> str:
 
     llm = ChatOpenAI(
         model=os.getenv("OPENAI_CHAT_MODEL", "gpt-5.6-terra"),
+        default_headers=OPENAI_HEADERS,
         max_retries=2,
     )
     return str(llm.invoke(prompt).content)
